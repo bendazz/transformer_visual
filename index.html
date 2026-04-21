@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Transformer Visual — Vocab & Embeddings</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #fafafa;
+    color: #222;
+    margin: 2rem auto;
+    max-width: 900px;
+    padding: 0 1rem;
+    line-height: 1.5;
+  }
+  h1 { font-size: 1.4rem; }
+  h2 { font-size: 1.2rem; margin-top: 3rem; }
+  p.intro { color: #555; }
+
+  .lookup {
+    display: grid;
+    align-items: center;
+    row-gap: 0.5rem;
+    column-gap: 0.75rem;
+    margin-top: 1.5rem;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+  }
+  .word, .index, .position, .vector {
+    padding: 0.4rem 0.7rem;
+    border-radius: 6px;
+    text-align: center;
+    min-width: 3rem;
+  }
+  .word     { background: #e8f0fe; color: #1a3a80; }
+  .index    { background: #fff4d6; color: #8a5a00; }
+  .position { background: #fde4f0; color: #8a1a55; }
+  .vector   { background: #e6f6ea; color: #1e6b3a; }
+  .arrow {
+    color: #888;
+    font-family: sans-serif;
+    user-select: none;
+  }
+
+  .header {
+    font-weight: 600;
+    color: #666;
+    text-align: center;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding-bottom: 0.25rem;
+    border-bottom: 1px solid #ddd;
+  }
+
+  .layout {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 2rem;
+    align-items: start;
+    margin-top: 1.5rem;
+  }
+  .plot-wrap {
+    position: sticky;
+    top: 1rem;
+  }
+  svg.plot {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    width: 360px;
+    height: 360px;
+    display: block;
+  }
+  svg.plot text.label {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 11px;
+  }
+  svg.plot text.label.word  { fill: #1a3a80; }
+  svg.plot text.label.pos   { fill: #8a1a55; }
+  svg.plot text.label.final { fill: #0b5a3a; }
+  svg.plot .axis {
+    stroke: #ccc;
+    stroke-width: 1;
+  }
+  svg.plot .tick {
+    stroke: #e5e5e5;
+    stroke-width: 1;
+  }
+  svg.plot .tick-label {
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 10px;
+    fill: #888;
+  }
+  svg.plot .dot.word  { fill: #1a73e8; }
+  svg.plot .dot.pos   { fill: #c2367a; }
+  svg.plot .dot.final { fill: #15a06c; }
+  svg.plot .connector {
+    stroke: #bbb;
+    stroke-width: 1;
+    stroke-dasharray: 3 3;
+    fill: none;
+  }
+  .final  { background: #dff3ea; color: #0b5a3a; }
+  .opsym {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    color: #666;
+    padding: 0 0.25rem;
+  }
+  .legend {
+    display: flex;
+    gap: 1rem;
+    font-size: 0.85rem;
+    color: #555;
+    margin-top: 0.5rem;
+  }
+  .legend .swatch {
+    display: inline-block;
+    width: 0.7rem;
+    height: 0.7rem;
+    border-radius: 50%;
+    margin-right: 0.35rem;
+    vertical-align: middle;
+  }
+
+  form#sentence-form {
+    margin-top: 1rem;
+    display: flex;
+    gap: 0.5rem;
+  }
+  #sentence-input {
+    flex: 1;
+    padding: 0.5rem 0.75rem;
+    font-size: 1rem;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    font-family: inherit;
+  }
+  #sentence-form button {
+    padding: 0.5rem 1rem;
+    font-size: 1rem;
+    background: #1a73e8;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  #sentence-form button:hover { background: #1558b8; }
+
+  .error {
+    color: #b3261e;
+    font-size: 0.9rem;
+    min-height: 1.2rem;
+    margin-top: 0.4rem;
+  }
+
+  .token-stack {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+  }
+  .token {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
+  }
+  .token .arrow { font-size: 1rem; }
+  .token .word, .token .index, .token .vector {
+    min-width: 4rem;
+  }
+  .token.clickable {
+    cursor: pointer;
+    padding: 0.4rem;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    transition: background 0.1s, border-color 0.1s;
+  }
+  .token.clickable:hover {
+    background: #f0f4fa;
+  }
+  .token.clickable.selected {
+    background: #eaf3ff;
+    border-color: #1a73e8;
+  }
+</style>
+</head>
+<body>
+
+<h1>Vocabulary &rarr; Index &rarr; Embedding</h1>
+<p class="intro">
+  Each word in the vocabulary is assigned an integer index. That index is used
+  to look up a vector in the embedding table. Here the embeddings are 2D so we
+  can picture them directly.
+</p>
+
+<div class="layout">
+  <div class="lookup" id="vocab-lookup"
+       style="grid-template-columns: auto auto auto auto auto;">
+    <div class="header">word</div>
+    <div></div>
+    <div class="header">index</div>
+    <div></div>
+    <div class="header">embedding</div>
+  </div>
+
+  <div class="plot-wrap">
+    <svg class="plot" id="vocab-plot" viewBox="0 0 360 360"></svg>
+  </div>
+</div>
+
+<h2>Position &rarr; Position Embedding</h2>
+<p class="intro">
+  Word embeddings carry meaning but not order — the word "cat" gets the same
+  vector whether it's the first or the fifth token. Position embeddings fix
+  this by assigning a distinct vector to each slot in the sentence. We assume
+  sentences of up to 21 tokens (positions 0–20). Here we use the classic
+  sinusoidal formula:&nbsp;
+  <code>PE(p) = [sin(p·ω), cos(p·ω)]</code>, so every position lands on the
+  unit circle.
+</p>
+
+<div class="layout">
+  <div class="lookup" id="pos-lookup"
+       style="grid-template-columns: auto auto auto;">
+    <div class="header">position</div>
+    <div></div>
+    <div class="header">embedding</div>
+  </div>
+
+  <div class="plot-wrap">
+    <svg class="plot" id="pos-plot" viewBox="0 0 360 360"></svg>
+  </div>
+</div>
+
+<h2>Embed a Sentence</h2>
+<p class="intro">
+  Type a sentence using words from the vocabulary above. Each token will be
+  mapped to its index and then to its 2D embedding vector.
+</p>
+
+<form id="sentence-form">
+  <input type="text" id="sentence-input"
+         placeholder="the cat sat on the mat"
+         autocomplete="off" />
+  <button type="submit">Embed</button>
+</form>
+<div class="error" id="sentence-error"></div>
+
+<div class="layout">
+  <div id="sentence-tokens" class="token-stack"></div>
+  <div class="plot-wrap">
+    <svg class="plot" id="sentence-plot" viewBox="0 0 360 360"></svg>
+  </div>
+</div>
+
+<h2>Sentence &rarr; Position &rarr; Position Embedding</h2>
+<p class="intro">
+  And here is the same sentence, but each token is mapped to its
+  <em>position</em> in the sentence (0, 1, 2, …) and then to its position
+  embedding vector.
+</p>
+
+<div class="layout">
+  <div id="pos-sentence-tokens" class="token-stack"></div>
+  <div class="plot-wrap">
+    <svg class="plot" id="pos-sentence-plot" viewBox="0 0 360 360"></svg>
+  </div>
+</div>
+
+<h2>Word Embedding + Position Embedding = Final Embedding</h2>
+<p class="intro">
+  The transformer's actual input to the first layer is the <em>sum</em> of the
+  word embedding and the position embedding. Same word at a different position
+  → different final vector. The plot shows all three vectors for each token
+  together; a dashed line connects each word embedding to its final embedding
+  (the displacement is exactly the position embedding).
+  <strong>Tip:</strong> click a token below to isolate just its three vectors.
+  Click again to show everything.
+</p>
+
+<div class="layout">
+  <div id="final-sentence-tokens" class="token-stack"></div>
+  <div class="plot-wrap">
+    <svg class="plot" id="final-sentence-plot" viewBox="0 0 360 360"></svg>
+    <div class="legend">
+      <span><span class="swatch" style="background:#1a73e8"></span>word</span>
+      <span><span class="swatch" style="background:#c2367a"></span>position</span>
+      <span><span class="swatch" style="background:#15a06c"></span>final</span>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ---------- Vocabulary embeddings ----------
+  const vocab = ["the", "cat", "dog", "sat", "ran", "on", "mat", "floor"];
+
+  const embeddings = {
+    "the":   [ 0.10,  0.05],
+    "cat":   [ 0.80,  0.60],
+    "dog":   [ 0.75,  0.65],
+    "sat":   [-0.40,  0.50],
+    "ran":   [-0.45,  0.55],
+    "on":    [ 0.15, -0.10],
+    "mat":   [ 0.60, -0.70],
+    "floor": [ 0.55, -0.75],
+  };
+
+  // ---------- Position embeddings ----------
+  const MAX_POS = 21;                       // positions 0..20 inclusive
+  const OMEGA = (2 * Math.PI) / MAX_POS;    // one full revolution across the range
+  const positions = Array.from({length: MAX_POS}, (_, p) => p);
+  const posEmbeddings = Object.fromEntries(
+    positions.map(p => [p, [Math.sin(p * OMEGA), Math.cos(p * OMEGA)]])
+  );
+
+  // ---------- Table rendering ----------
+  const fmt = v => (v >= 0 ? " " : "") + v.toFixed(2);
+
+  function addRow(container, cells) {
+    cells.forEach(({ text, cls }) => {
+      const el = document.createElement("div");
+      el.className = cls;
+      el.textContent = text;
+      container.appendChild(el);
+    });
+  }
+
+  const vocabTable = document.getElementById("vocab-lookup");
+  vocab.forEach((word, i) => {
+    const [x, y] = embeddings[word];
+    addRow(vocabTable, [
+      { text: `"${word}"`,               cls: "word"   },
+      { text: "→",                       cls: "arrow"  },
+      { text: i,                         cls: "index"  },
+      { text: "→",                       cls: "arrow"  },
+      { text: `[${fmt(x)}, ${fmt(y)}]`,  cls: "vector" },
+    ]);
+  });
+
+  const posTable = document.getElementById("pos-lookup");
+  positions.forEach(p => {
+    const [x, y] = posEmbeddings[p];
+    addRow(posTable, [
+      { text: p,                         cls: "position" },
+      { text: "→",                       cls: "arrow"    },
+      { text: `[${fmt(x)}, ${fmt(y)}]`,  cls: "vector"   },
+    ]);
+  });
+
+  // ---------- Scatter plot (reusable) ----------
+  const SVG_NS = "http://www.w3.org/2000/svg";
+  const mk = (tag, attrs, text) => {
+    const el = document.createElementNS(SVG_NS, tag);
+    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+    if (text !== undefined) el.textContent = text;
+    return el;
+  };
+
+  const SIZE = 360;
+  const PAD  = 30;
+
+  function makeProjector(range) {
+    return {
+      toPx: v => PAD + ((v + range) / (2 * range)) * (SIZE - 2 * PAD),
+      toPy: v => SIZE - (PAD + ((v + range) / (2 * range)) * (SIZE - 2 * PAD)),
+    };
+  }
+
+  function drawAxes(svg, range = 1) {
+    const { toPx, toPy } = makeProjector(range);
+    const step = range <= 1 ? 0.5 : 1;
+    const ticks = [];
+    for (let t = -range; t <= range + 1e-9; t += step) ticks.push(+t.toFixed(3));
+
+    ticks.forEach(t => {
+      svg.appendChild(mk("line", {
+        class: "tick",
+        x1: toPx(t), y1: PAD, x2: toPx(t), y2: SIZE - PAD,
+      }));
+      svg.appendChild(mk("line", {
+        class: "tick",
+        x1: PAD, y1: toPy(t), x2: SIZE - PAD, y2: toPy(t),
+      }));
+      svg.appendChild(mk("text", {
+        class: "tick-label",
+        x: toPx(t), y: SIZE - PAD + 12, "text-anchor": "middle",
+      }, t));
+      svg.appendChild(mk("text", {
+        class: "tick-label",
+        x: PAD - 6, y: toPy(t) + 3, "text-anchor": "end",
+      }, t));
+    });
+
+    svg.appendChild(mk("line", {
+      class: "axis",
+      x1: toPx(0), y1: PAD, x2: toPx(0), y2: SIZE - PAD,
+    }));
+    svg.appendChild(mk("line", {
+      class: "axis",
+      x1: PAD, y1: toPy(0), x2: SIZE - PAD, y2: toPy(0),
+    }));
+  }
+
+  function drawPoints(svg, points, { pointClass = "word", labelClass = "word", range = 1 } = {}) {
+    const { toPx, toPy } = makeProjector(range);
+    points.forEach(({ label, x, y }) => {
+      const cx = toPx(x), cy = toPy(y);
+      svg.appendChild(mk("circle", { class: `dot ${pointClass}`, cx, cy, r: 4 }));
+      svg.appendChild(mk("text", {
+        class: `label ${labelClass}`,
+        x: cx + 7, y: cy - 7,
+      }, label));
+    });
+  }
+
+  function drawConnector(svg, a, b, range = 1) {
+    const { toPx, toPy } = makeProjector(range);
+    svg.appendChild(mk("line", {
+      class: "connector",
+      x1: toPx(a.x), y1: toPy(a.y),
+      x2: toPx(b.x), y2: toPy(b.y),
+    }));
+  }
+
+  function drawScatter(svg, points, opts = {}) {
+    const range = opts.range ?? 1;
+    drawAxes(svg, range);
+    drawPoints(svg, points, { ...opts, range });
+  }
+
+  drawScatter(
+    document.getElementById("vocab-plot"),
+    vocab.map(w => ({ label: w, x: embeddings[w][0], y: embeddings[w][1] })),
+    { pointClass: "word", labelClass: "word" },
+  );
+
+  drawScatter(
+    document.getElementById("pos-plot"),
+    positions.map(p => ({ label: p, x: posEmbeddings[p][0], y: posEmbeddings[p][1] })),
+    { pointClass: "pos", labelClass: "pos" },
+  );
+
+  // ---------- Sentence embedding ----------
+  const wordToIndex = Object.fromEntries(vocab.map((w, i) => [w, i]));
+
+  const sentenceForm      = document.getElementById("sentence-form");
+  const sentenceInput     = document.getElementById("sentence-input");
+  const sentenceError     = document.getElementById("sentence-error");
+  const tokensEl          = document.getElementById("sentence-tokens");
+  const sentencePlot      = document.getElementById("sentence-plot");
+  const posTokensEl       = document.getElementById("pos-sentence-tokens");
+  const posSentencePlot   = document.getElementById("pos-sentence-plot");
+  const finalTokensEl     = document.getElementById("final-sentence-tokens");
+  const finalSentencePlot = document.getElementById("final-sentence-plot");
+
+  function makeTokenColumn(cells) {
+    const col = document.createElement("div");
+    col.className = "token";
+    cells.forEach(({ text, cls }) => {
+      const el = document.createElement("div");
+      el.className = cls;
+      el.textContent = text;
+      col.appendChild(el);
+    });
+    return col;
+  }
+
+  function clearSentenceOutputs() {
+    tokensEl.innerHTML = "";
+    sentencePlot.innerHTML = "";
+    posTokensEl.innerHTML = "";
+    posSentencePlot.innerHTML = "";
+    finalTokensEl.innerHTML = "";
+    finalSentencePlot.innerHTML = "";
+  }
+
+  function renderSentence(tokens) {
+    tokensEl.innerHTML = "";
+    posTokensEl.innerHTML = "";
+    finalTokensEl.innerHTML = "";
+
+    const finals = tokens.map((w, i) => {
+      const [wx, wy] = embeddings[w];
+      const [px, py] = posEmbeddings[i];
+      return [wx + px, wy + py];
+    });
+
+    tokens.forEach((word, i) => {
+      const idx = wordToIndex[word];
+      const [wx, wy] = embeddings[word];
+      const [px, py] = posEmbeddings[i];
+      const [fx, fy] = finals[i];
+
+      tokensEl.appendChild(makeTokenColumn([
+        { text: `"${word}"`,                cls: "word"     },
+        { text: "↓",                        cls: "arrow"    },
+        { text: idx,                        cls: "index"    },
+        { text: "↓",                        cls: "arrow"    },
+        { text: `[${fmt(wx)}, ${fmt(wy)}]`, cls: "vector"   },
+      ]));
+
+      posTokensEl.appendChild(makeTokenColumn([
+        { text: `"${word}"`,                cls: "word"     },
+        { text: "↓",                        cls: "arrow"    },
+        { text: i,                          cls: "position" },
+        { text: "↓",                        cls: "arrow"    },
+        { text: `[${fmt(px)}, ${fmt(py)}]`, cls: "vector"   },
+      ]));
+
+      const finalCol = makeTokenColumn([
+        { text: `"${word}"`,                cls: "word"     },
+        { text: "↓",                        cls: "arrow"    },
+        { text: `[${fmt(wx)}, ${fmt(wy)}]`, cls: "vector"   },
+        { text: "+",                        cls: "opsym"    },
+        { text: `[${fmt(px)}, ${fmt(py)}]`, cls: "vector"   },
+        { text: "=",                        cls: "opsym"    },
+        { text: `[${fmt(fx)}, ${fmt(fy)}]`, cls: "final"    },
+      ]);
+      finalCol.classList.add("clickable");
+      finalCol.dataset.tokenIndex = i;
+      finalCol.addEventListener("click", () => {
+        selectedTokenIndex = (selectedTokenIndex === i) ? null : i;
+        updateFinalSelectionUI(tokens, finals);
+      });
+      finalTokensEl.appendChild(finalCol);
+    });
+
+    sentencePlot.innerHTML = "";
+    drawScatter(
+      sentencePlot,
+      tokens.map((w, i) => ({
+        label: `${w}${tokens.length > 1 ? "·" + i : ""}`,
+        x: embeddings[w][0],
+        y: embeddings[w][1],
+      })),
+      { pointClass: "word", labelClass: "word" },
+    );
+
+    posSentencePlot.innerHTML = "";
+    drawScatter(
+      posSentencePlot,
+      tokens.map((w, i) => ({
+        label: `${w}·${i}`,
+        x: posEmbeddings[i][0],
+        y: posEmbeddings[i][1],
+      })),
+      { pointClass: "pos", labelClass: "pos" },
+    );
+
+    selectedTokenIndex = null;
+    updateFinalSelectionUI(tokens, finals);
+  }
+
+  let selectedTokenIndex = null;
+  const COMBINED_RANGE = 2;
+
+  function updateFinalSelectionUI(tokens, finals) {
+    // Highlight the selected token column (if any).
+    [...finalTokensEl.children].forEach((col, idx) => {
+      col.classList.toggle("selected", idx === selectedTokenIndex);
+    });
+
+    // Either show one token's three vectors, or all tokens.
+    const indices = selectedTokenIndex === null
+      ? tokens.map((_, i) => i)
+      : [selectedTokenIndex];
+
+    finalSentencePlot.innerHTML = "";
+    drawAxes(finalSentencePlot, COMBINED_RANGE);
+
+    indices.forEach(i => {
+      const [wx, wy] = embeddings[tokens[i]];
+      const [fx, fy] = finals[i];
+      drawConnector(finalSentencePlot, { x: wx, y: wy }, { x: fx, y: fy }, COMBINED_RANGE);
+    });
+
+    const multi = tokens.length > 1 && selectedTokenIndex === null;
+
+    drawPoints(finalSentencePlot,
+      indices.map(i => ({
+        label: `${tokens[i]}${multi ? "·" + i : ""}`,
+        x: embeddings[tokens[i]][0],
+        y: embeddings[tokens[i]][1],
+      })),
+      { pointClass: "word", labelClass: "word", range: COMBINED_RANGE });
+
+    drawPoints(finalSentencePlot,
+      indices.map(i => ({
+        label: i,
+        x: posEmbeddings[i][0],
+        y: posEmbeddings[i][1],
+      })),
+      { pointClass: "pos", labelClass: "pos", range: COMBINED_RANGE });
+
+    drawPoints(finalSentencePlot,
+      indices.map(i => ({
+        label: `${tokens[i]}·${i}`,
+        x: finals[i][0],
+        y: finals[i][1],
+      })),
+      { pointClass: "final", labelClass: "final", range: COMBINED_RANGE });
+  }
+
+  sentenceForm.addEventListener("submit", e => {
+    e.preventDefault();
+    sentenceError.textContent = "";
+
+    const raw = sentenceInput.value.toLowerCase();
+    // Strip anything that isn't a letter or whitespace (punctuation, digits),
+    // then split on whitespace and drop empties.
+    const tokens = raw.replace(/[^a-z\s]/g, " ").split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) {
+      clearSentenceOutputs();
+      return;
+    }
+
+    if (tokens.length > MAX_POS) {
+      sentenceError.textContent =
+        `Sentence too long: ${tokens.length} tokens (max is ${MAX_POS}).`;
+      clearSentenceOutputs();
+      return;
+    }
+    const unknown = [...new Set(tokens.filter(t => !(t in wordToIndex)))];
+
+    if (unknown.length > 0) {
+      sentenceError.textContent =
+        `Not in vocabulary: ${unknown.map(w => `"${w}"`).join(", ")}. ` +
+        `Try words like: ${vocab.slice(0, 5).join(", ")}, …`;
+      clearSentenceOutputs();
+      return;
+    }
+
+    renderSentence(tokens);
+  });
+</script>
+
+</body>
+</html>
